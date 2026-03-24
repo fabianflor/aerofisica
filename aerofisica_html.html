@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
+<title>AeroFísica — Cinemática</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:#080f1a;color:#fff;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;padding:8px;touch-action:none;}
+h1{font-size:18px;color:#4fc3f7;margin:4px 0 2px;}
+p.sub{font-size:11px;color:#7aa;margin-bottom:6px;}
+#hud{display:flex;flex-wrap:wrap;gap:5px;justify-content:center;margin-bottom:5px;}
+.hud-item{background:rgba(255,255,255,0.07);border-radius:7px;padding:3px 8px;text-align:center;min-width:62px;}
+.hud-label{font-size:9px;color:#999;}
+.hud-val{font-size:13px;font-weight:bold;}
+#canvas{border:2px solid #1565c0;border-radius:10px;display:block;max-width:100%;}
+#minimap{display:block;margin:3px auto 0;}
+#maplegend{font-size:9px;color:#445;margin-top:2px;text-align:center;}
+/* Touch controls */
+#controls{display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:8px;}
+.ctrl-row{display:flex;gap:8px;}
+.btn{width:58px;height:58px;border-radius:12px;background:rgba(255,255,255,0.1);border:2px solid #1565c0;color:#fff;font-size:22px;display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;-webkit-user-select:none;}
+.btn:active{background:rgba(79,195,247,0.3);border-color:#4fc3f7;}
+/* Overlay */
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,0.88);display:flex;align-items:center;justify-content:center;z-index:100;}
+.modal{background:#0d1b2e;border-radius:16px;padding:22px 20px;max-width:360px;width:93%;text-align:center;}
+.modal h2{font-size:18px;margin:8px 0;}
+.modal p{font-size:13px;line-height:1.6;color:#e0e0e0;margin-bottom:10px;}
+.modal .example{background:rgba(255,255,255,0.06);border-radius:8px;padding:9px 12px;font-size:12px;color:#ccc;margin-bottom:14px;text-align:left;}
+.btn-ok{border:none;border-radius:8px;padding:11px 26px;font-size:15px;font-weight:bold;cursor:pointer;width:100%;}
+/* Quiz */
+.quiz-opt{display:block;width:100%;background:rgba(255,255,255,0.07);border:1px solid #555;border-radius:8px;padding:9px 12px;color:#fff;cursor:pointer;text-align:left;font-size:13px;margin-bottom:6px;}
+.quiz-opt:active{background:rgba(79,195,247,0.2);}
+.result-box{border-radius:10px;padding:12px;margin-top:6px;font-size:13px;}
+@keyframes pulse{from{opacity:1}to{opacity:.45}}
+#alert-bar{position:fixed;top:10px;left:50%;transform:translateX(-50%);padding:6px 18px;border-radius:8px;font-size:13px;font-weight:bold;display:none;z-index:99;animation:pulse .6s infinite alternate;white-space:nowrap;}
+</style>
+</head>
+<body>
+
+<h1>🛩️ AeroFísica — Cinemática</h1>
+<p class="sub">Bachillerato · Toca los botones para volar</p>
+
+<div id="hud">
+  <div class="hud-item"><div class="hud-label">⏱ t</div><div class="hud-val" id="ht" style="color:#fff176">0s</div></div>
+  <div class="hud-item"><div class="hud-label">📍 x</div><div class="hud-val" id="hx" style="color:#4fc3f7">0m</div></div>
+  <div class="hud-item"><div class="hud-label">↔ Δx</div><div class="hud-val" id="hdx" style="color:#ffab91">0m</div></div>
+  <div class="hud-item"><div class="hud-label">💨 Rapidez</div><div class="hud-val" id="hspd" style="color:#ce93d8">0m/s</div></div>
+  <div class="hud-item"><div class="hud-label">🚀 Velocidad</div><div class="hud-val" id="hvel" style="color:#f48fb1">0m/s</div></div>
+  <div class="hud-item"><div class="hud-label">🧠 Quiz</div><div class="hud-val" id="hquiz" style="color:#a5d6a7">0/3</div></div>
+</div>
+
+<canvas id="canvas"></canvas>
+<svg id="minimap" height="28"></svg>
+<div id="maplegend"></div>
+
+<!-- Touch controls -->
+<div id="controls">
+  <div class="ctrl-row"><button class="btn" id="bUp">▲</button></div>
+  <div class="ctrl-row">
+    <button class="btn" id="bLeft">◀</button>
+    <button class="btn" id="bDown">▼</button>
+    <button class="btn" id="bRight">▶</button>
+  </div>
+</div>
+
+<div id="alert-bar"></div>
+<div id="overlay"></div>
+
+<script>
+const TW=3200;
+const STOPS=[
+  {id:"posicion",x:400,color:"#4fc3f7",icon:"📍",title:"Posición",
+   def:"La POSICIÓN (x) es el lugar donde se encuentra un objeto medido desde un punto de referencia llamado ORIGEN (x = 0).",
+   ejemplo:"Ahora estás en x = 400 m. El origen es la torre de control al inicio de la pista."},
+  {id:"instante",x:750,color:"#fff176",icon:"⏱",title:"Instante de Tiempo",
+   def:"Un INSTANTE DE TIEMPO (t) es un momento puntual en el tiempo. Como una fotografía: captura el estado exacto en ese segundo.",
+   ejemplo:"Cuando llegaste aquí el reloj marcaba un instante t exacto, visible en el HUD superior."},
+  {id:"intervalo",x:1150,color:"#a5d6a7",icon:"⏳",title:"Intervalo de Tiempo",
+   def:"El INTERVALO DE TIEMPO (Δt) es la duración entre dos instantes: Δt = t₂ − t₁. Siempre es positivo.",
+   ejemplo:"Si saliste a t=0 s y llegaste aquí a t=15 s, entonces Δt = 15 s."},
+  {id:"desplaz",x:1600,color:"#ffab91",icon:"↔",title:"Desplazamiento",
+   def:"El DESPLAZAMIENTO (Δx) es el cambio de posición: Δx = x₂ − x₁. Tiene dirección: positivo (→) o negativo (←).",
+   ejemplo:"Partiste de x=0. Ahora x=1600 m. Tu desplazamiento es Δx = +1600 m en dirección positiva."},
+  {id:"rapidez",x:2100,color:"#ce93d8",icon:"💨",title:"Rapidez",
+   def:"La RAPIDEZ es la distancia total recorrida dividida entre el tiempo. Es un escalar: siempre mayor o igual a cero, sin dirección.",
+   ejemplo:"Tu velocímetro muestra la rapidez. Siempre positiva, sin importar hacia dónde vayas."},
+  {id:"velocidad",x:2650,color:"#f48fb1",icon:"🚀",title:"Velocidad",
+   def:"La VELOCIDAD (v) = Δx / Δt. Es un VECTOR: tiene magnitud y dirección. v > 0 si avanzas, v < 0 si retrocedes.",
+   ejemplo:"Si Δx = 2650 m y Δt = 40 s → v = 66.25 m/s hacia adelante. ¡Lleva signo!"},
+];
+const QUIZZES=[
+  {x:950,q:"Estás en x=200 m y te mueves a x=950 m. ¿Cuál es tu desplazamiento?",
+   opts:["750 m →","1150 m →","−750 m ←","950 m"],correct:0,
+   exp:"Δx = x₂ − x₁ = 950 − 200 = 750 m en dirección positiva ✅"},
+  {x:1900,q:"Un avión vuela 400 m en 8 s. ¿Cuál es su rapidez?",
+   opts:["50 m/s","3200 m/s","408 m/s","0.02 m/s"],correct:0,
+   exp:"Rapidez = distancia / tiempo = 400 / 8 = 50 m/s ✅"},
+  {x:2900,q:"¿Por qué la velocidad puede ser negativa pero la rapidez no?",
+   opts:["Porque la velocidad es un vector con dirección","Porque la rapidez es mayor siempre","Son lo mismo","La velocidad siempre es positiva"],correct:0,
+   exp:"La velocidad indica dirección (vector). Negativa = retrocede. La rapidez es escalar: solo magnitud ✅"},
+];
+
+// Canvas setup responsive
+const canvas=document.getElementById("canvas");
+const CW=Math.min(window.innerWidth-16,800);
+const CH=Math.round(CW*0.52);
+canvas.width=CW; canvas.height=CH;
+const GROUND_Y=CH*0.68;
+const ctx=canvas.getContext("2d");
+
+// State
+const state={x:50,y:CH*0.4,vx:0,vy:0,t:0,hist:[],seenStops:new Set(),seenQuizzes:new Set()};
+const keys={left:false,right:false,up:false,down:false};
+let animId=null, lastTs=null, paused=false, quizScore=0;
+
+// Touch buttons
+function bindBtn(id,dir){
+  const el=document.getElementById(id);
+  el.addEventListener("touchstart",e=>{e.preventDefault();keys[dir]=true;},{passive:false});
+  el.addEventListener("touchend",e=>{e.preventDefault();keys[dir]=false;},{passive:false});
+  el.addEventListener("mousedown",()=>keys[dir]=true);
+  el.addEventListener("mouseup",()=>keys[dir]=false);
+}
+bindBtn("bLeft","left"); bindBtn("bRight","right");
+bindBtn("bUp","up"); bindBtn("bDown","down");
+
+// Keyboard
+window.addEventListener("keydown",e=>{
+  if(e.key==="ArrowLeft"||e.key==="a")keys.left=true;
+  if(e.key==="ArrowRight"||e.key==="d")keys.right=true;
+  if(e.key==="ArrowUp"||e.key==="w")keys.up=true;
+  if(e.key==="ArrowDown"||e.key==="s")keys.down=true;
+});
+window.addEventListener("keyup",e=>{
+  if(e.key==="ArrowLeft"||e.key==="a")keys.left=false;
+  if(e.key==="ArrowRight"||e.key==="d")keys.right=false;
+  if(e.key==="ArrowUp"||e.key==="w")keys.up=false;
+  if(e.key==="ArrowDown"||e.key==="s")keys.down=false;
+});
+
+function drawScene(){
+  const s=state, camX=Math.max(0,Math.min(TW-CW,s.x-CW*0.35));
+  // Sky
+  const sg=ctx.createLinearGradient(0,0,0,GROUND_Y);
+  sg.addColorStop(0,"#07111f");sg.addColorStop(1,"#0d2a4a");
+  ctx.fillStyle=sg;ctx.fillRect(0,0,CW,GROUND_Y);
+  // Clouds
+  [180,420,680,950,1250,1600,1950,2300,2700,3050].forEach((cx,i)=>{
+    const sx=cx-camX*0.35, sy=45+(i%3)*28;
+    if(sx<-80||sx>CW+80)return;
+    ctx.fillStyle="rgba(255,255,255,0.11)";
+    [0,26,-20].forEach(dx=>{ctx.beginPath();ctx.arc(sx+dx,sy,20,0,Math.PI*2);ctx.fill();});
+  });
+  // Mountains
+  [[250,90],[600,115],[1000,80],[1400,110],[1850,95],[2250,120],[2700,85],[3100,100]].forEach(([mx,mh],i)=>{
+    const sx=mx-camX;
+    if(sx<-140||sx>CW+140)return;
+    ctx.fillStyle=i%2?"#1c2e40":"#243447";
+    ctx.beginPath();ctx.moveTo(sx-80,GROUND_Y);ctx.lineTo(sx,GROUND_Y-mh);ctx.lineTo(sx+80,GROUND_Y);ctx.closePath();ctx.fill();
+    ctx.fillStyle="rgba(255,255,255,0.65)";
+    ctx.beginPath();ctx.moveTo(sx-16,GROUND_Y-mh+16);ctx.lineTo(sx,GROUND_Y-mh);ctx.lineTo(sx+16,GROUND_Y-mh+16);ctx.closePath();ctx.fill();
+  });
+  // Ground
+  const gg=ctx.createLinearGradient(0,GROUND_Y,0,CH);
+  gg.addColorStop(0,"#1e4d0f");gg.addColorStop(1,"#0f2a07");
+  ctx.fillStyle=gg;ctx.fillRect(0,GROUND_Y,CW,CH-GROUND_Y);
+  // Runway
+  ctx.fillStyle="#3a3a3a";ctx.fillRect(0,GROUND_Y,CW,22);
+  ctx.strokeStyle="#fff";ctx.setLineDash([24,16]);ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(0,GROUND_Y+11);ctx.lineTo(CW,GROUND_Y+11);ctx.stroke();
+  ctx.setLineDash([]);
+  // KM markers
+  for(let m=0;m<=TW;m+=200){
+    const sx=m-camX;
+    if(sx<-30||sx>CW+30)continue;
+    ctx.strokeStyle="#ffd54f88";ctx.lineWidth=1;ctx.setLineDash([3,3]);
+    ctx.beginPath();ctx.moveTo(sx,GROUND_Y-6);ctx.lineTo(sx,GROUND_Y+2);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle="#ffd54fcc";ctx.font="bold 9px monospace";ctx.textAlign="center";
+    ctx.fillText(m+"m",sx,GROUND_Y-8);
+  }
+  // Origin
+  const ox=0-camX;
+  if(ox>-20&&ox<CW+20){
+    ctx.fillStyle="#ff5722";ctx.fillRect(ox-2,GROUND_Y-36,4,38);
+    ctx.font="bold 10px sans-serif";ctx.fillStyle="#ff5722";ctx.textAlign="center";ctx.fillText("x=0",ox,GROUND_Y-39);
+  }
+  // Stop flags
+  STOPS.forEach(st=>{
+    const sx=st.x-camX;
+    if(sx<-40||sx>CW+40)return;
+    ctx.strokeStyle=st.color;ctx.lineWidth=2;ctx.setLineDash([5,4]);
+    ctx.beginPath();ctx.moveTo(sx,GROUND_Y-70);ctx.lineTo(sx,GROUND_Y);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle="rgba(0,0,0,0.78)";ctx.strokeStyle=st.color;ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.roundRect(sx-50,GROUND_Y-96,100,24,5);ctx.fill();ctx.stroke();
+    ctx.fillStyle=st.color;ctx.font="bold 10px sans-serif";ctx.textAlign="center";
+    ctx.fillText(st.icon+" "+st.title,sx,GROUND_Y-80);
+  });
+  // Quiz flags
+  QUIZZES.forEach(q=>{
+    const sx=q.x-camX;
+    if(sx<-40||sx>CW+40)return;
+    ctx.strokeStyle="#ff9800";ctx.lineWidth=2;ctx.setLineDash([4,4]);
+    ctx.beginPath();ctx.moveTo(sx,GROUND_Y-55);ctx.lineTo(sx,GROUND_Y);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle="rgba(60,30,0,0.85)";ctx.strokeStyle="#ff9800";ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.roundRect(sx-30,GROUND_Y-76,60,20,5);ctx.fill();ctx.stroke();
+    ctx.fillStyle="#ff9800";ctx.font="bold 9px sans-serif";ctx.textAlign="center";
+    ctx.fillText("🧠 QUIZ",sx,GROUND_Y-62);
+  });
+  // Displacement arrow
+  if(s.x>5){
+    const ax=Math.max(0-camX,-5),bx=Math.min(s.x-camX,CW+5),ay=GROUND_Y+32;
+    ctx.strokeStyle="#ff704388";ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,ay);ctx.stroke();
+    if(bx<CW+4){ctx.fillStyle="#ff7043";ctx.beginPath();ctx.moveTo(bx,ay-4);ctx.lineTo(bx+7,ay);ctx.lineTo(bx,ay+4);ctx.closePath();ctx.fill();}
+    const mx2=Math.min(Math.max((ax+bx)/2,35),CW-50);
+    ctx.fillStyle="#ff7043cc";ctx.font="bold 9px monospace";ctx.textAlign="center";
+    ctx.fillText("Δx="+Math.round(s.x)+"m",mx2,ay-6);
+  }
+  // Mini graph
+  if(s.hist.length>1){
+    const gx=CW-150,gy=6,gw=144,gh=62;
+    ctx.fillStyle="rgba(0,0,0,0.65)";ctx.strokeStyle="#4fc3f7";ctx.lineWidth=1;
+    ctx.beginPath();ctx.roundRect(gx,gy,gw,gh,5);ctx.fill();ctx.stroke();
+    ctx.fillStyle="#90caf9";ctx.font="9px monospace";ctx.textAlign="left";
+    ctx.fillText("x(t) posición vs tiempo",gx+4,gy+12);
+    const mt=Math.max(s.hist[s.hist.length-1].t,1);
+    ctx.strokeStyle="#4fc3f7";ctx.lineWidth=2;ctx.beginPath();
+    s.hist.forEach((p,i)=>{
+      const hx=gx+5+(p.t/mt)*(gw-10), hy=gy+gh-4-(p.x/TW)*(gh-18);
+      i===0?ctx.moveTo(hx,hy):ctx.lineTo(hx,hy);
+    });
+    ctx.stroke();
+  }
+  // Plane
+  const plx=s.x-camX, ply=s.y;
+  ctx.save();ctx.translate(plx,ply);
+  ctx.fillStyle="#e8f4fd";ctx.beginPath();ctx.ellipse(0,0,28,8,0,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#90caf9";
+  ctx.beginPath();ctx.moveTo(-7,-2);ctx.lineTo(7,-2);ctx.lineTo(4,-16);ctx.lineTo(-13,-16);ctx.closePath();ctx.fill();
+  ctx.beginPath();ctx.moveTo(-24,-2);ctx.lineTo(-17,-2);ctx.lineTo(-15,-10);ctx.lineTo(-26,-10);ctx.closePath();ctx.fill();
+  ctx.fillStyle="#29b6f6";ctx.beginPath();ctx.ellipse(9,-3,7,5,0,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#ffd54f";ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(28,-10);ctx.lineTo(28,10);ctx.stroke();
+  ctx.restore();
+}
+
+function updateMinimap(){
+  const W=Math.min(window.innerWidth-16,800);
+  const svg=document.getElementById("minimap");
+  svg.setAttribute("width",W);
+  let html=`<rect x="0" y="10" width="${W}" height="8" rx="4" fill="#1a2a3a"/>`;
+  STOPS.forEach(s=>{
+    const sx=(s.x/TW)*W;
+    html+=`<line x1="${sx}" y1="6" x2="${sx}" y2="22" stroke="${s.color}" stroke-width="1.5"/>`;
+    html+=`<text x="${sx}" y="5" text-anchor="middle" font-size="8" fill="${s.color}">${s.icon}</text>`;
+  });
+  QUIZZES.forEach(q=>{
+    const sx=(q.x/TW)*W;
+    html+=`<line x1="${sx}" y1="6" x2="${sx}" y2="22" stroke="#ff9800" stroke-width="1.5"/>`;
+    html+=`<text x="${sx}" y="5" text-anchor="middle" font-size="8" fill="#ff9800">🧠</text>`;
+  });
+  html+=`<text x="${W-4}" y="16" text-anchor="end" font-size="10" fill="#a5d6a7">🏁</text>`;
+  const px=Math.min((state.x/TW)*W,W-8);
+  html+=`<rect x="${px-4}" y="8" width="8" height="12" rx="2" fill="#4fc3f7"/>`;
+  svg.innerHTML=html;
+}
+
+function updateHud(){
+  const s=state;
+  document.getElementById("ht").textContent=s.t.toFixed(1)+"s";
+  document.getElementById("hx").textContent=Math.round(s.x)+"m";
+  document.getElementById("hdx").textContent=Math.round(s.x)+"m";
+  document.getElementById("hspd").textContent=Math.abs(s.vx).toFixed(0)+"m/s";
+  document.getElementById("hvel").textContent=(s.vx>=0?"+":"")+s.vx.toFixed(0)+"m/s";
+  document.getElementById("hquiz").textContent=quizScore+"/3";
+}
+
+// Overlay helpers
+const overlay=document.getElementById("overlay");
+const alertBar=document.getElementById("alert-bar");
+
+function showConceptModal(stop){
+  paused=true;
+  overlay.style.display="flex";
+  overlay.innerHTML=`
+    <div class="modal" style="border:3px solid ${stop.color};box-shadow:0 0 40px ${stop.color}44;">
+      <div style="font-size:38px">${stop.icon}</div>
+      <h2 style="color:${stop.color}">${stop.title}</h2>
+      <p>${stop.def}</p>
+      <div class="example">💡 ${stop.ejemplo}</div>
+      <button class="btn-ok" style="background:${stop.color};color:#000;" onclick="closeOverlay()">¡Entendido! Seguir volando ✈️</button>
+    </div>`;
+}
+
+function showQuizModal(quiz,idx){
+  paused=true;
+  overlay.style.display="flex";
+  overlay.innerHTML=`
+    <div class="modal" style="border:3px solid #ff9800;box-shadow:0 0 40px #ff980044;">
+      <div style="color:#ff9800;font-weight:bold;font-size:15px;margin-bottom:10px">🧠 QUIZ</div>
+      <p style="margin-bottom:12px">${quiz.q}</p>
+      ${quiz.opts.map((o,i)=>`<button class="quiz-opt" onclick="answerQuiz(${i},${idx})">${String.fromCharCode(65+i)}) ${o}</button>`).join("")}
+    </div>`;
+}
+
+function answerQuiz(i,idx){
+  const quiz=QUIZZES[idx];
+  const ok=i===quiz.correct;
+  if(ok)quizScore++;
+  overlay.innerHTML=`
+    <div class="modal" style="border:3px solid ${ok?"#a5d6a7":"#ef9a9a"};box-shadow:0 0 40px ${ok?"#a5d6a744":"#ef9a9a44"};">
+      <div style="font-size:36px">${ok?"✅":"❌"}</div>
+      <h2 style="color:${ok?"#a5d6a7":"#ef9a9a"}">${ok?"¡Correcto!":"Incorrecto"}</h2>
+      <div class="result-box" style="background:${ok?"rgba(0,80,0,0.5)":"rgba(80,0,0,0.5)"};border:1px solid ${ok?"#a5d6a7":"#ef9a9a"};">
+        ${quiz.exp}
+      </div>
+      <p style="color:#aaa;font-size:12px;margin-top:10px">Cerrando en 3 s...</p>
+    </div>`;
+  setTimeout(()=>closeOverlay(),3000);
+}
+
+function closeOverlay(){
+  overlay.style.display="none";
+  overlay.innerHTML="";
+  paused=false;
+  lastTs=null;
+  alertBar.style.display="none";
+  requestAnimationFrame(loop);
+}
+
+function showAlert(text,color){
+  alertBar.textContent=text;
+  alertBar.style.display="block";
+  alertBar.style.background="rgba(0,0,0,0.88)";
+  alertBar.style.border=`2px solid ${color}`;
+  alertBar.style.color=color;
+}
+
+function showGameOver(){
+  paused=true;
+  overlay.style.display="flex";
+  const vmed=(state.x/Math.max(state.t,0.1)).toFixed(1);
+  overlay.innerHTML=`
+    <div class="modal" style="border:3px solid #a5d6a7;box-shadow:0 0 40px #a5d6a744;">
+      <div style="font-size:50px">🏁</div>
+      <h2 style="color:#a5d6a7">¡Llegaste a la meta!</h2>
+      <p>Tiempo: <b style="color:#fff176">${state.t.toFixed(1)} s</b></p>
+      <p>Desplazamiento: <b style="color:#ffab91">${Math.round(state.x)} m</b></p>
+      <p>Velocidad media: <b style="color:#f48fb1">${vmed} m/s</b></p>
+      <p style="margin-bottom:14px">Quiz: <b style="color:#a5d6a7">${quizScore}/3 ✅</b></p>
+      <button class="btn-ok" style="background:#2e7d32;color:#fff;" onclick="restartGame()">Volar de nuevo 🔄</button>
+    </div>`;
+}
+
+function restartGame(){
+  state.x=50;state.y=CH*0.4;state.vx=0;state.vy=0;state.t=0;state.hist=[];
+  state.seenStops=new Set();state.seenQuizzes=new Set();
+  quizScore=0;paused=false;lastTs=null;
+  overlay.style.display="none";overlay.innerHTML="";
+  alertBar.style.display="none";
+  requestAnimationFrame(loop);
+}
+
+function loop(ts){
+  if(paused)return;
+  if(!lastTs)lastTs=ts;
+  const dt=Math.min((ts-lastTs)/1000,0.05);lastTs=ts;
+  const s=state;
+  const A=220,BRAKE=0.68,DRAG=0.94,MAX=260,GV=80,MAXVY=110;
+  if(keys.right)s.vx=Math.min(s.vx+A*dt,MAX);
+  else if(keys.left)s.vx=Math.max(s.vx-A*dt*2,-MAX*0.4);
+  else s.vx*=BRAKE;
+  if(keys.up)s.vy=Math.max(s.vy-A*dt,-MAXVY);
+  if(keys.down)s.vy=Math.min(s.vy+A*dt,MAXVY);
+  s.vx*=DRAG;s.vy+=GV*dt*0.4;s.vy*=DRAG;
+  s.x=Math.max(0,Math.min(TW,s.x+s.vx*dt));
+  s.y=Math.max(50,Math.min(GROUND_Y-12,s.y+s.vy*dt));
+  s.t+=dt;
+  if(s.hist.length===0||s.t-s.hist[s.hist.length-1].t>0.25){
+    s.hist.push({t:s.t,x:s.x});if(s.hist.length>150)s.hist.shift();
+  }
+  drawScene();updateHud();updateMinimap();
+
+  // Approaching alert
+  let appFound=false;
+  STOPS.forEach(st=>{if(!s.seenStops.has(st.id)&&s.x<st.x&&st.x-s.x<180){showAlert("⚠️ "+st.icon+" "+st.title+" — ¡Próximo!",st.color);appFound=true;}});
+  QUIZZES.forEach((q,i)=>{if(!s.seenQuizzes.has(i)&&s.x<q.x&&q.x-s.x<180){showAlert("⚠️ 🧠 QUIZ próximo","#ff9800");appFound=true;}});
+  if(!appFound)alertBar.style.display="none";
+
+  // Triggers
+  let triggered=false;
+  STOPS.forEach(st=>{if(!s.seenStops.has(st.id)&&Math.abs(s.x-st.x)<55){s.seenStops.add(st.id);showConceptModal(st);triggered=true;}});
+  if(!triggered)QUIZZES.forEach((q,i)=>{if(!s.seenQuizzes.has(i)&&Math.abs(s.x-q.x)<55){s.seenQuizzes.add(i);showQuizModal(q,i);triggered=true;}});
+  if(!triggered&&s.x>=TW-30){showGameOver();return;}
+  if(!triggered)animId=requestAnimationFrame(loop);
+}
+
+// Start screen
+overlay.style.display="flex";
+overlay.innerHTML=`
+  <div class="modal" style="border:3px solid #4fc3f7;box-shadow:0 0 40px #4fc3f744;">
+    <div style="font-size:48px">🛩️</div>
+    <h2 style="color:#4fc3f7">AeroFísica</h2>
+    <p>Vuela sobre la pista y aprende <b>Cinemática</b>.<br>Cuando pases por una bandera el juego se pausa y aparece la definición. <b>Cópiala en tu cuaderno tal como aparece.</b></p>
+    <div style="background:rgba(255,255,255,0.07);border-radius:8px;padding:8px 12px;font-size:12px;color:#bbb;margin-bottom:14px;">
+      ▶ avanzar &nbsp; ◀ frenar &nbsp; ▲▼ subir/bajar<br>
+      (también flechas del teclado si usas PC)
+    </div>
+    <button class="btn-ok" style="background:#1565c0;color:#fff;" onclick="closeOverlay()">¡Despegar! 🚀</button>
+  </div>`;
+</script>
+</body>
+</html>
